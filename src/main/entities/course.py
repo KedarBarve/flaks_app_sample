@@ -23,9 +23,9 @@ def get ( name ) :
     try :
 
         if name in course_data :
-            data =  { "data" : course[name] }
+            data =  course_data[name]
         else:
-            data =  { "data" : "Not found" }
+            data =  "Not found"
 
         results_response = data
 

@@ -23,9 +23,9 @@ def get ( name ) :
     try :
 
         if name in student_data :
-            data =  { "data" : student[name] }
+            data =  student_data[name]
         else:
-            data =  { "data" : "Not found" }
+            data =  "Not found" 
 
         results_response = data
 
@@ -60,7 +60,7 @@ def post( api_entity = None ) :
 
         student_data[name] = api_entity.getData()
     
-        results_response = { "data" : student_data[name]  }
+        results_response = student_data[name]
 
         returnStatus = "success"
 
