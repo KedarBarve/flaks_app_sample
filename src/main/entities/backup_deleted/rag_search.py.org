@@ -1,0 +1,253 @@
+from pymongo import MongoClient
+#from transformers import AutoTokenizer, AutoModel
+#import torch
+#import numpy as np
+
+mongo_connection_string = "CONNECTION_STRING"
+cluster_name = 'CLUSTER_NAME'  # Replace with your MongoDB Atlas Cluster Name
+database_name = 'DB_NAME'  # Replace with your Database Name
+collection_name = 'COLLECTION_NAME'  # Replace with your Collection Name
+fulltext_search_index = 'FULLTEXT_SEARCH_INDEX'  # Replace with your Collection Name
+vector_search_index = 'VECTOR_SEARCH_INDEX'  # Replace with your Collection Name
+
+# Load a pre-trained Hugging Face model for embeddings
+model_name = "sentence-transformers/all-MiniLM-L6-v2"  # You can use any model you prefer
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModel.from_pretrained(model_name)
+
+
+def get_embeddings(text):
+    inputs = tokenizer(text, return_tensors='pt', padding=True, truncation=True)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    # Pool the output into a single embedding (you can customize this step)
+    embeddings = outputs.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()
+    return embeddings
+
+
+# def search(srch_phrase, embedding):
+def search(srch_phrase):
+    client = MongoClient(mongo_connection_string)
+
+    # Connect to your specific database and collection
+    db = client[database_name]
+    collection = db[collection_name]
+
+    print("collection: " + str(collection))
+
+    phrase_embeddings = get_embeddings(srch_phrase)
+    query_vector = list(phrase_embeddings)
+    query_vector = [float(i) for i in query_vector]
+    # np_vector = np.array(query_vector)
+    # np_vector_tuple = tuple(np_vector.tolist())
+    # tuple_result = query_vector
+    vectorWeight = 0.1
+
+    fullTextWeight = 0.9
+
+    query = [
+        {
+            "$vectorSearch": {
+                "index": vector_search_index,
+                "path": "name_embedding",
+                # 'queryVector': np_vector,
+                'numCandidates': 150,
+                'queryVector': query_vector,
+                'limit': 10
+
+            },
+        },
+        # {
+        #     "$addFields": {
+        #         "score": {"$meta": "searchScore"},
+        #         'search_meta': "$$SEARCH_META"
+        #     }
+        # },
+        {
+            '$project': {
+                '_id': 0,
+                'name': 1,
+                'score': {
+                    '$meta': 'vectorSearchScore'
+                }
+            }
+        },
+        {
+                "$group": {
+                  "_id": None,
+                  "docs": {"$push": "$$ROOT"}
+                }
+            },
+        {
+
+                "$unwind": {
+                  "path": "$docs",
+                  "includeArrayIndex": "rank"
+                }
+
+            }, {
+
+                "$addFields": {
+                  "vs_score": {
+                    "$multiply": [
+                      vectorWeight, {
+                        "$divide": [
+                          1.0, {
+                            "$add": ["$rank", 60]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+            }, {
+
+                "$project": {
+                  "vs_score": 1,
+                  "_id": "$docs._id",
+                  "name": "$docs.name"
+                }
+
+            }, {
+
+                "$unionWith": {
+                  "coll": collection_name,
+                  "pipeline": [
+                    {
+                      "$search": {
+                        "index": fulltext_search_index,
+                        "phrase": {
+                          "query": srch_phrase,
+                          "path": "name"
+                        }
+                      }
+                    }, {
+                      "$limit": 20
+                    }, {
+                      "$group": {
+                        "_id": None,
+                        "docs": {"$push": "$$ROOT"}
+                      }
+                    }, {
+                      "$unwind": {
+                        "path": "$docs",
+                        "includeArrayIndex": "rank"
+                      }
+
+                    }, {
+                      "$addFields": {
+                        "fts_score": {
+                          "$multiply": [
+                            fullTextWeight, {
+                              "$divide": [
+                                1.0, {
+                                  "$add": ["$rank", 60]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    },
+
+                    {
+                      "$project": {
+                        "fts_score": 1,
+                        "_id": "$docs._id",
+                        "name": "$docs.name"
+                      }
+                    }
+                  ]
+                }
+            }, {
+
+                "$group": {
+                  "_id": "$name",
+                  "vs_score": {"$max": "$vs_score"},
+                  "fts_score": {"$max": "$fts_score"}
+                }
+
+            }, {
+                "$project": {
+                  "_id": 1,
+                  "name": 1,
+                  "vs_score": {"$ifNull": ["$vs_score", 0]},
+                  "fts_score": {"$ifNull": ["$fts_score", 0]}
+                }
+            }, {
+                "$project": {
+                  "score": {"$add": ["$fts_score", "$vs_score"]},
+                  "_id": 1,
+                  "name": 1,
+                  "vs_score": 1,
+                  "fts_score": 1
+                }
+
+            },
+
+            {"$sort": {"score": -1}},
+
+            {"$limit": 10}
+    ]
+
+    results = collection.aggregate(query)
+
+    for result in results:
+        print("result: "+str(result))
+        if '_id' in result :
+            #result.pop('_id')
+            pass
+
+        if "facet" in result:
+            facets = result['facet']
+            print("\nFacets:")
+
+            # Print category facet
+            if "nameFacet" in facets:
+                print("Category Facet:")
+                for facet in facets['nameFacet']['buckets']:
+                    print(f"- {facet['_id']}: {facet['count']} occurrences")
+
+    # return results
+
+
+def extract_company_data(search_results, max_tokens=256):
+    rag_prompt = f": {search_results}."
+
+    response = client.chat.completions.create(
+        model='gpt-3.5-turbo',
+        temperature=0,
+        messages=[
+            {"answer": rag_prompt}
+        ]
+    )
+    summary = response.choices[0].message.content.strip()
+
+    print(summary)
+
+    return {'summary': summary}
+
+
+#from openai import OpenAI
+
+#import os
+#import sys
+#from dotenv import load_dotenv,find_dotenv
+
+#import json
+#import time
+
+#from textwrap import wrap
+
+#load_dotenv()
+
+#api_key = os.getenv("OPENAI_API_KEY")
+#client = OpenAI()
+
+
+# search("test")
+#search("aperion_user1")
+
+
+
+

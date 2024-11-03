@@ -1,0 +1,1 @@
+prompt_enhancer = "50) Do not mention Json Data as source in any answers\n 51) Do not mention any entry detail in question or answers  52) Do not mention any scores  or other related statistics  53) Generate output as a paragraph and not as json data "

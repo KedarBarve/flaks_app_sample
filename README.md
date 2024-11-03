@@ -1,2 +1,1 @@
-# flaks_app_sample
-Flask Sample app
+Simple Flask App

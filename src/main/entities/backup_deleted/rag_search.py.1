@@ -1,0 +1,595 @@
+from pymongo import MongoClient
+from transformers import AutoTokenizer, AutoModel
+import torch
+import sys
+import numpy as np
+if __name__ != '__main__' :
+    from egsc_torus_config import  egsc_torus_rag_config
+else:
+    from ..egsc_torus_config import  egsc_torus_rag_config
+
+from search_entity import search_entity
+
+def get_rag_config( rag_text_search_config) :
+
+    mongo_connection_string = None
+
+    database_name = None
+
+    collection_name = None
+
+    vector_search_index = None
+
+    model_name = "sentence-transformers/all-MiniLM-L6-v2"
+
+    if rag_text_search_config :
+
+        mongo_connection_string = rag_text_search_config.get("mongo_connection_string", None )
+
+        database_name = rag_text_search_config.get("database_name", None )
+
+        collection_name = rag_text_search_config.get("collection_name", None )
+
+        embedding_collection_name = rag_text_search_config.get("embedding_collection_name", None )
+
+        full_text_search_index = rag_text_search_config.get("full_text_search_index", None )
+
+        vector_search_index = rag_text_search_config.get("vector_search_index", None )
+
+        model_name = rag_text_search_config.get("model_name", "sentence-transformers/all-MiniLM-L6-v2" )  
+
+
+    return ( mongo_connection_string , database_name, collection_name, embedding_collection_name , full_text_search_index , vector_search_index , model_name ) 
+
+
+# Load a pre-trained Hugging Face model for embeddings
+
+
+
+def get_embeddings(text):
+
+    inputs = tokenizer(text, return_tensors='pt', padding=True, truncation=True)
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+
+    # Pool the output into a single embedding (you can customize this step)
+
+    embeddings = outputs.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()
+
+    return embeddings
+
+( mongo_connection_string , database_name, collection_name, embedding_collection_name , full_text_search_index , vector_search_index , model_name )  =  get_rag_config ( egsc_torus_rag_config )
+
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+model = AutoModel.from_pretrained(model_name)
+
+def search1( search_phrase = None , search_entity = None ) :
+
+    exception_str = "default Exception"
+
+    response =  { "error" : exception_str } 
+
+    try :
+
+        if search_entity :
+            search_phrase = search_entity.getRequestFieldData( "search_phrase" )
+
+        client = MongoClient(mongo_connection_string)
+
+        # Connect to your specific database and collection
+
+        db = client[database_name]
+
+        collection = db[collection_name]
+
+        print("collection: " + str(collection))
+
+        query_old = [
+            {
+            "vectorSearch": {
+                "index": vector_search_index,
+                "facet": {
+                    "operator": {
+                        "compound": {
+                            "should": [
+                                {
+                                    "text": {
+                                        "path": embedding_collection_name,
+                                        "query": search_phrase,
+                                        # "score": {"boost": {"value": 100}},
+                                        # "allowAnalyzedField": True
+                                        "fuzzy": {}
+                                    },
+                                }
+                            ]
+                        }
+                    },
+
+                    "facets": {
+                        "nameFacet": {
+                            "type": "string",
+                            "path": "name",
+                            "numBuckets": 30
+                        },
+                    }
+
+                },
+                # "minimumShouldMatch": 1
+            },
+        }, {
+            "$addFields": {
+                "score": {"$meta": "searchScore"},
+                'search_meta': "$$SEARCH_META"
+            }
+        }]
+
+        phrase_embeddings = get_embeddings(search_phrase)
+
+        query_vector = list(phrase_embeddings)
+
+        query_vector = [float(i) for i in query_vector]
+
+        vectorWeight = 0.1
+
+        fullTextWeight = 0.9
+
+        query = [
+            {
+                "$vectorSearch": {
+                    "index": vector_search_index,
+                    "path": "name_embedding",
+                    # 'queryVector': np_vector,
+                    'numCandidates': 150,
+                    'queryVector': query_vector,
+                    'limit': 10
+
+                },
+            },
+            # {
+            #     "$addFields": {
+            #         "score": {"$meta": "searchScore"},
+            #         'search_meta': "$$SEARCH_META"
+            #     }
+            # },
+            {
+                '$project': {
+                    '_id': 0,
+                    'name': 1,
+                    'score': {
+                        '$meta': 'vectorSearchScore'
+                    }
+                }
+            },
+            {
+                    "$group": {
+                      "_id": None,
+                      "docs": {"$push": "$$ROOT"}
+                    }
+                },
+            {
+
+                    "$unwind": {
+                      "path": "$docs",
+                      "includeArrayIndex": "rank"
+                    }
+
+                }, {
+
+                    "$addFields": {
+                      "vs_score": {
+                        "$multiply": [
+                          vectorWeight, {
+                            "$divide": [
+                              1.0, {
+                                "$add": ["$rank", 60]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                }, {
+
+                    "$project": {
+                      "vs_score": 1,
+                      "_id": "$docs._id",
+                      "name": "$docs.name"
+                    }
+
+                }, {
+
+                    "$unionWith": {
+                      "coll": collection_name,
+                      "pipeline": [
+                        {
+                          "$search": {
+                            "index": full_text_search_index,
+                            "phrase": {
+                              "query": search_phrase,
+                              "path": "name"
+                            }
+                          }
+                        }, {
+                          "$limit": 20
+                        }, {
+                          "$group": {
+                            "_id": None,
+                            "docs": {"$push": "$$ROOT"}
+                          }
+                        }, {
+                          "$unwind": {
+                            "path": "$docs",
+                            "includeArrayIndex": "rank"
+                          }
+
+                        }, {
+                          "$addFields": {
+                            "fts_score": {
+                              "$multiply": [
+                                fullTextWeight, {
+                                  "$divide": [
+                                    1.0, {
+                                      "$add": ["$rank", 60]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          }
+                        },
+
+                        {
+                          "$project": {
+                            "fts_score": 1,
+                            "_id": "$docs._id",
+                            "company_name": "$docs.company_name",
+                            "company_description": "$docs.company_description",
+                            "company_products": "$docs.company_products"
+                          }
+                        }
+                      ]
+                    }
+                }, {
+
+                    "$group": {
+                      # "_id": "$company_name",
+                      "_id": "$_id",
+                      # "company_name": "$company_name",
+                      "vs_score": {"$max": "$vs_score"},
+                      "fts_score": {"$max": "$fts_score"},
+                        "company_name": { "$first": "$company_name"},
+                        "company_description": { "$first": "$company_description"},
+                        "company_products": { "$first": "$company_products"}
+                    }
+
+                }, {
+                    "$project": {
+                      "_id": 1,
+                      "company_name": 1,
+                      "company_description": 1,
+                      "company_products": 1,
+                      "vs_score": {"$ifNull": ["$vs_score", 0]},
+                      "fts_score": {"$ifNull": ["$fts_score", 0]}
+                    }
+                }, {
+                    "$project": {
+                      "score": {"$add": ["$fts_score", "$vs_score"]},
+                      "_id": 1,
+                      # "_d": "$_id",
+                      # "_f": "$company_name",
+                      "company_name": 1,
+                      "company_description": 1,
+                      "company_products": 1,
+                      "vs_score": 1,
+                      "fts_score": 1
+                    }
+
+                },
+
+                {"$sort": {"score": -1}},
+
+                {"$limit": 10}
+        ]
+
+        results = collection.aggregate(query)
+
+        responseList = []
+
+        for result in results:
+            print("result: "+str(result))
+            if '_id' in result :
+                #result.pop('_id')
+                pass
+            responseList.append ( result )
+
+            if "facet" in result:
+                facets = result['facet']
+                print("\nFacets:")
+
+                # Print category facet
+                if "nameFacet" in facets:
+                    print("Category Facet:")
+                    for facet in facets['nameFacet']['buckets']:
+                        print(f"- {facet['_id']}: {facet['count']} occurrences")
+
+        vector_response = responseList
+
+        rag_response = get_llm_response ( search_phrase , responseList )
+
+        response = {    "vector_summary" : vector_response ,
+                        "rag_summary" : rag_response }
+
+        returnStatus = "success"
+
+    except Exception as e:
+
+        exception_str = str ( e )
+
+        response = { "error" : exception_str  }
+
+        returnStatus = "failure" 
+
+    finally :
+
+        return ( response , returnStatus )
+
+def search( search_phrase = None , search_entity = None ) :
+
+    exception_str = ""
+
+    response = { "error" : exception_str  }
+
+    try :
+
+        if search_entity :
+            search_phrase = search_entity.getRequestFieldData( "search_phrase" )
+    
+        client = MongoClient(mongo_connection_string)
+    
+        # Connect to your specific database and collection
+    
+        db = client[database_name]
+    
+        collection = db[collection_name]
+    
+#        print("collection: " + str(collection))
+    
+        phrase_embeddings = get_embeddings(search_phrase)
+    
+        query_vector = list(phrase_embeddings)
+    
+        query_vector = [float(i) for i in query_vector]
+    
+        # np_vector = np.array(query_vector)
+        # np_vector_tuple = tuple(np_vector.tolist())
+        # tuple_result = query_vector
+    
+        vectorWeight = 0.1
+    
+        fullTextWeight = 0.9
+    
+        query = [
+            {
+                "$vectorSearch": {
+                    "index": vector_search_index,
+                    "path": embedding_collection_name,
+                    # 'queryVector': np_vector,
+                    'numCandidates': 150,
+                    'queryVector': query_vector,
+                    'limit': 10
+    
+                },
+            },
+            # {
+            #     "$addFields": {
+            #         "score": {"$meta": "searchScore"},
+            #         'search_meta': "$$SEARCH_META"
+            #     }
+            # },
+            {
+                '$project': {
+                    '_id': 0,
+                    'name': 1,
+                    'score': {
+                        '$meta': 'vectorSearchScore'
+                    }
+                }
+            },
+            {
+                    "$group": {
+                      "_id": None,
+                      "docs": {"$push": "$$ROOT"}
+                    }
+                },
+            {
+    
+                    "$unwind": {
+                      "path": "$docs",
+                      "includeArrayIndex": "rank"
+                    }
+    
+                }, {
+    
+                    "$addFields": {
+                      "vs_score": {
+                        "$multiply": [
+                          vectorWeight, {
+                            "$divide": [
+                              1.0, {
+                                "$add": ["$rank", 60]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                }, {
+    
+                    "$project": {
+                      "vs_score": 1,
+                      "_id": "$docs._id",
+                      "name": "$docs.company_name"
+                    }
+    
+                }, {
+    
+                    "$unionWith": {
+                      "coll": collection_name,
+                      "pipeline": [
+                        {
+                          "$search": {
+                            "index": full_text_search_index,
+                            "phrase": {
+                              "query": search_phrase,
+                              "path": "company_name"
+                            }
+                          }
+                        }, {
+                          "$limit": 20
+                        }, {
+                          "$group": {
+                            "_id": None,
+                            "docs": {"$push": "$$ROOT"}
+                          }
+                        }, {
+                          "$unwind": {
+                            "path": "$docs",
+                            "includeArrayIndex": "rank"
+                          }
+    
+                        }, {
+                          "$addFields": {
+                            "fts_score": {
+                              "$multiply": [
+                                fullTextWeight, {
+                                  "$divide": [
+                                    1.0, {
+                                      "$add": ["$rank", 60]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          }
+                        },
+    
+                        {
+                          "$project": {
+                            "fts_score": 1,
+                            "_id": "$docs._id",
+                            "name": "$docs.company_name"
+                          }
+                        }
+                      ]
+                    }
+                }, {
+    
+                    "$group": {
+                      "_id": "$name",
+                      "vs_score": {"$max": "$vs_score"},
+                      "fts_score": {"$max": "$fts_score"}
+                    }
+    
+                }, {
+                    "$project": {
+                      "_id": 1,
+                      "company_name": 1,
+                      "vs_score": {"$ifNull": ["$vs_score", 0]},
+                      "fts_score": {"$ifNull": ["$fts_score", 0]}
+                    }
+                }, {
+                    "$project": {
+                      "score": {"$add": ["$fts_score", "$vs_score"]},
+                      "_id": 1,
+                      "name": 1,
+                      "vs_score": 1,
+                      "fts_score": 1
+                    }
+    
+                },
+    
+                {"$sort": {"score": -1}},
+    
+                {"$limit": 10}
+        ]
+    
+        responseList = []
+    
+        results = collection.aggregate(query)
+    
+        for result in results:
+
+            if '_id' in result :
+                result.pop('_id')
+
+            responseList.append ( result )
+
+            print("result: "+str(result))
+    
+            if "facet" in result:
+                facets = result['facet']
+                print("\nFacets:")
+    
+                # Print category facet
+                if "nameFacet" in facets:
+                    print("Category Facet:")
+                    for facet in facets['nameFacet']['buckets']:
+                        print(f"- {facet['_id']}: {facet['count']} occurrences")
+    
+        hybrid_response = responseList
+
+        rag_response = get_llm_response ( search_phrase , responseList )
+
+        response = {    "hybrid_summary" : hybrid_response ,
+                        "rag_summary" : rag_response }
+
+        returnStatus = "success"
+
+    except Exception as e:
+
+        exception_str = str ( e )
+
+        response = { "error" : exception_str  }
+
+        returnStatus = "failure" 
+
+    finally :
+
+        return ( response , returnStatus )
+
+
+
+
+def get_llm_response ( search_phrase , responseList ) :
+
+    response = {}
+
+    llm_response = {}
+
+    try :
+
+        response =  { "message" : "success" , "data" : llm_response  } 
+
+    except Exception as e:
+
+        exception_str = str ( e )
+
+        response =  { "message" : "failure" , "data" : exception_str  } 
+
+    finally :
+
+        return response
+
+
+if __name__ == '__main__':
+
+    search_phrase = "Axiomtek" 
+
+    ( response, status ) =  search( search_phrase  = search_phrase )
+
+    print ( response )
+
+
+

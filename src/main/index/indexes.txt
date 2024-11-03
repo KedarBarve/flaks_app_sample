@@ -1,0 +1,67 @@
+company_fulltext_index
+
+{
+  "mappings": {
+    "dynamic": false,
+    "fields": {
+      "company_name": [
+        {
+          "type": "stringFacet"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "company_products": [
+        {
+          "type": "stringFacet"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "company_services": [
+        {
+          "type": "stringFacet"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "company_description": [
+        {
+          "type": "string"
+        }
+      ],
+      "company_verticals": [
+        {
+          "type": "stringFacet"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    }
+  }
+}
+
+------------------------------------
+
+company_vector_index
+{
+  "fields": [
+    {
+      "numDimensions": 384,
+      "path": "company_name_embedding",
+      "similarity": "cosine",
+      "type": "vector"
+    },{
+      "numDimensions": 384,
+      "path": "company_description_embedding",
+      "similarity": "cosine",
+      "type": "vector"
+    }
+  ]
+}
+
+
