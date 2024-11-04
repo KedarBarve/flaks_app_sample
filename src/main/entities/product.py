@@ -11,19 +11,19 @@ from api_entity import api_entity
 
 logger = logging.getLogger(__name__)
 
-course_data = {}
+product_data = {}
 
 
 def get ( name ) :
 
     data = {}
 
-    global course_data
+    global product_data
 
     try :
 
-        if name in course_data :
-            data =  course_data[name]
+        if name in product_data :
+            data =  product_data[name]
         else:
             data =  "Not found"
 
@@ -47,7 +47,7 @@ def get ( name ) :
 def post( api_entity = None ) :
 
 
-    global course_data
+    global product_data
 
     exception_str = ""
 
@@ -58,9 +58,9 @@ def post( api_entity = None ) :
         if api_entity :
             name = api_entity.getRequestFieldData( "name" )
 
-        course_data[name] = api_entity.getData()
+        product_data[name] = api_entity.getData()
 
-        results_response = { "data" : course_data[name]  }
+        results_response = { "data" : product_data[name]  }
 
         returnStatus = "success"
 

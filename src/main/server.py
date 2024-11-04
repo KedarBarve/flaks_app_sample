@@ -7,8 +7,8 @@ import sys
 
 logging.basicConfig(filename='/app/logs/base_backend.log', level=logging.DEBUG)
 
-from entities import student_url
-from entities import course_url
+from entities import customer_url
+from entities import product_url
 
 
 from base_config import base_configuration
@@ -33,9 +33,9 @@ app = Flask(__name__)
 CORS(app)
 
 
-app.register_blueprint(student_url.student_blueprint, url_prefix='/treehouse'  )
+app.register_blueprint(customer_url.customer_blueprint, url_prefix='/treehouse'  )
 
-app.register_blueprint(course_url.course_blueprint, url_prefix='/treehouse'  )
+app.register_blueprint(product_url.product_blueprint, url_prefix='/treehouse'  )
 
 
 

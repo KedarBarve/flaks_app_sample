@@ -5,22 +5,22 @@ from api_entity import api_entity
 import logging
 import json
 import re
-from . import student as treehouse_student
+from . import customer as treehouse_customer
 
 import logging
 
 
 
-student_blueprint = Blueprint('student_blueprint', __name__ )
+customer_blueprint = Blueprint('customer_blueprint', __name__ )
 
 logger = logging.getLogger(__name__)
 
-@student_blueprint.route('/hellos' ,  methods=['GET'])
-def hello_student():
+@customer_blueprint.route('/hellos' ,  methods=['GET'])
+def hello_customer():
 
     try :
 
-        data = "Hello Student" 
+        data = "Hello Customer" 
 
         return jsonify (  message = "success" , data = data ) , 200
 
@@ -33,14 +33,14 @@ def hello_student():
 
 
 
-@student_blueprint.route('/student/<name>' ,  methods=['GET'])
-def get_student(name):
+@customer_blueprint.route('/customer/<name>' ,  methods=['GET'])
+def get_customer(name):
 
     try :
 
         message = "failure"
 
-        ( response , resultStatus )  = treehouse_student.get ( name = name )
+        ( response , resultStatus )  = treehouse_customer.get ( name = name )
 
         if ( resultStatus == "success" ) :
             apiStatus = 200
@@ -61,8 +61,8 @@ def get_student(name):
         return jsonify (  message = "failure" , data = exception_str  ) , 400
 
 
-@student_blueprint.route('/student' ,  methods=['POST'])
-def post_student():
+@customer_blueprint.route('/customer' ,  methods=['POST'])
+def post_customer():
 
     validRequest = False 
 
@@ -93,7 +93,7 @@ def post_student():
 
         if validRequest :
 
-            ( response , resultStatus )  = treehouse_student.post ( api_entity = api_entity_detail )
+            ( response , resultStatus )  = treehouse_customer.post ( api_entity = api_entity_detail )
 
             if ( resultStatus == "success" ) :
                 apiStatus = 200

@@ -5,21 +5,21 @@ from api_entity import api_entity
 import logging
 import json
 import re
-from . import course as treehouse_course
+from . import product as treehouse_product
 
 
 
-course_blueprint = Blueprint('course_blueprint', __name__ )
+product_blueprint = Blueprint('product_blueprint', __name__ )
 
 logger = logging.getLogger(__name__)
 
 
-@course_blueprint.route('/helloc' ,  methods=['GET'])
-def hello_course():
+@product_blueprint.route('/helloc' ,  methods=['GET'])
+def hello_product():
 
     try :
 
-        data =  "Hello Course"
+        data =  "Hello Product"
 
         return jsonify (  message = "success" , data = data ) , 200
 
@@ -31,14 +31,14 @@ def hello_course():
 
 
 
-@course_blueprint.route('/course/<name>' ,  methods=['GET'])
-def get_course(name):
+@product_blueprint.route('/product/<name>' ,  methods=['GET'])
+def get_product(name):
 
     message = "failure"
 
     try :
 
-        ( response , resultStatus )  = treehouse_course.get ( name = name )
+        ( response , resultStatus )  = treehouse_product.get ( name = name )
 
         if ( resultStatus == "success" ) :
             apiStatus = 200
@@ -58,8 +58,8 @@ def get_course(name):
         return jsonify (  message = "failure" , data = exception_str  ) , 400
 
 
-@course_blueprint.route('/course' ,  methods=['POST'])
-def post_course():
+@product_blueprint.route('/product' ,  methods=['POST'])
+def post_product():
 
     validRequest = False 
 
@@ -90,7 +90,7 @@ def post_course():
 
         if validRequest :
 
-            ( response , resultStatus )  = treehouse_course.post ( api_entity = api_entity_detail )
+            ( response , resultStatus )  = treehouse_product.post ( api_entity = api_entity_detail )
 
             if ( resultStatus == "success" ) :
                 apiStatus = 200
