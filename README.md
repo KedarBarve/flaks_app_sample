@@ -4,7 +4,7 @@ Simple Flask App
 
 cd bin
 
-./docker_run.sh
+./docker_build.sh
 
 # Check image is present or not
 
