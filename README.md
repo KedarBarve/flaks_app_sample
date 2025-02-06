@@ -1,15 +1,24 @@
 Simple Flask App
 
+# build the image named treehouse
+
 cd bin
+
 ./docker_run.sh
+
+# Check image is present or not
 
 docker images
+
+
+# run image is present or not
+
 ./docker_run.sh
 
-cd ../utils
+cd ../utils # go to utils directory
 
-# Data is stored in memory for illustration. Examples of psoting data.
-# Inspect the scripts on how to inspect . Port can be changed if needed
+Data is stored in memory for illustration. Examples of psoting data.
+Inspect the scripts on how to inspect . Port can be changed if needed
 
 [ec2-user@ip-172-31-85-91 utils]$ ./get_customer.sh
 {"data":"Not found","message":"success"}
